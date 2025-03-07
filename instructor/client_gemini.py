@@ -3,33 +3,32 @@ from __future__ import annotations
 
 from typing import Any, Literal, overload
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 import instructor
 
 
 @overload
 def from_gemini(
-    client: genai.GenerativeModel,
+    client: genai.AsyncClient,
     mode: instructor.Mode = instructor.Mode.GEMINI_JSON,
     use_async: Literal[True] = True,
     **kwargs: Any,
-) -> instructor.AsyncInstructor:
-    ...
+) -> instructor.AsyncInstructor: ...
 
 
 @overload
 def from_gemini(
-    client: genai.GenerativeModel,
+    client: genai.Client,
     mode: instructor.Mode = instructor.Mode.GEMINI_JSON,
     use_async: Literal[False] = False,
     **kwargs: Any,
-) -> instructor.Instructor:
-    ...
+) -> instructor.Instructor: ...
 
 
 def from_gemini(
-    client: genai.GenerativeModel,
+    client: genai.Client,
     mode: instructor.Mode = instructor.Mode.GEMINI_JSON,
     use_async: bool = False,
     **kwargs: Any,
@@ -41,11 +40,11 @@ def from_gemini(
 
     assert isinstance(
         client,
-        (genai.GenerativeModel),
-    ), "Client must be an instance of genai.generativemodel"
+        (genai.Client),
+    ), "Client must be an instance of genai.Client"
 
     if use_async:
-        create = client.generate_content_async
+        create = client.aio.models.generate_content
         return instructor.AsyncInstructor(
             client=client,
             create=instructor.patch(create=create, mode=mode),
@@ -54,7 +53,7 @@ def from_gemini(
             **kwargs,
         )
 
-    create = client.generate_content
+    create = client.models.generate_content
     return instructor.Instructor(
         client=client,
         create=instructor.patch(create=create, mode=mode),

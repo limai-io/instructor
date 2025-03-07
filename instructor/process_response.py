@@ -13,6 +13,7 @@ import logging
 from openai import pydantic_function_tool
 from openai.types.chat import ChatCompletion
 from pydantic import BaseModel, create_model
+from google.genai import types
 
 # from instructor.client_bedrock import handle_bedrock_json
 from instructor.mode import Mode
@@ -472,13 +473,13 @@ def handle_fireworks_json(
 def handle_gemini_json(
     response_model: type[T], new_kwargs: dict[str, Any]
 ) -> tuple[type[T], dict[str, Any]]:
-    assert (
-        "model" not in new_kwargs
-    ), "Gemini `model` must be set while patching the client, not passed as a parameter to the create method"
-
+    """
+    Handle JSON mode for Gemini API.
+    """
     from .utils import update_gemini_kwargs
 
-    message = dedent(
+    # Create system instruction with JSON schema
+    system_instruction = dedent(
         f"""
         As a genius expert, your task is to understand the content and provide
         the parsed objects in json that match the following json_schema:\n
@@ -489,16 +490,22 @@ def handle_gemini_json(
         """
     )
 
-    if new_kwargs["messages"][0]["role"] != "system":
-        new_kwargs["messages"].insert(0, {"role": "system", "content": message})
-    else:
-        new_kwargs["messages"][0]["content"] += f"\n\n{message}"
+    # If messages exist, convert them to contents
+    if "messages" in new_kwargs:
+        contents = []
+        for message in new_kwargs["messages"]:
+            if message.get("role") == "system":
+                system_instruction += f"\n\n{message.get('content', '')}"
+            else:
+                contents.append(message.get("content", ""))
+        new_kwargs["contents"] = contents
+        del new_kwargs["messages"]
 
-    new_kwargs["generation_config"] = new_kwargs.get("generation_config", {}) | {
-        "response_mime_type": "application/json"
-    }
+    # Add system instruction to config
+    new_kwargs["config"] = types.GenerateContentConfig(
+        system_instruction=system_instruction
+    )
 
-    new_kwargs = update_gemini_kwargs(new_kwargs)
     return response_model, new_kwargs
 
 

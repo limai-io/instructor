@@ -561,100 +561,6 @@ class classproperty(Generic[R_co]):
         return self.cproperty(cls)
 
 
-def get_message_content(message: ChatCompletionMessageParam) -> list[Any]:
-    """
-    Extract content from a message and ensure it's returned as a list.
-
-    This optimized version handles different message formats more efficiently.
-
-    Args:
-        message: A message in ChatCompletionMessageParam format
-
-    Returns:
-        The message content as a list
-    """
-    # Fast path for empty message
-    if not message:
-        return [""]
-
-    # Get content with default empty string
-    content = message.get("content", "")
-
-    # Fast path for common content types
-    if isinstance(content, list):
-        return content if content else [""]
-
-    # Return single item list with content (could be string, None, or other)
-    return [content if content is not None else ""]
-
-
-def transform_to_gemini_prompt(
-    messages_chatgpt: list[ChatCompletionMessageParam],
-) -> list[dict[str, Any]]:
-    """
-    Transform messages from OpenAI format to Gemini format.
-
-    This optimized version reduces redundant processing and improves
-    handling of system messages.
-
-    Args:
-        messages_chatgpt: Messages in OpenAI format
-
-    Returns:
-        Messages in Gemini format
-    """
-    # Fast path for empty messages
-    if not messages_chatgpt:
-        return []
-
-    # Process system messages first (collect all system messages)
-    system_prompts = []
-    for message in messages_chatgpt:
-        if message.get("role") == "system":
-            content = message.get("content", "")
-            if content:  # Only add non-empty system prompts
-                system_prompts.append(content)
-
-    # Format system prompt if we have any
-    system_prompt = ""
-    if system_prompts:
-        # Handle multiple system prompts by joining them
-        system_prompt = "\n\n".join(filter(None, system_prompts))
-
-    # Count non-system messages to pre-allocate result list
-    message_count = sum(1 for m in messages_chatgpt if m.get("role") != "system")
-    messages_gemini = []
-
-    # Role mapping for faster lookups
-    role_map = {
-        "user": "user",
-        "assistant": "model",
-    }
-
-    # Process non-system messages in one pass
-    for message in messages_chatgpt:
-        role = message.get("role", "")
-        if role in role_map:
-            gemini_role = role_map[role]
-            messages_gemini.append(
-                {"role": gemini_role, "parts": get_message_content(message)}
-            )
-
-    # Add system prompt if we have one
-    if system_prompt:
-        if messages_gemini:
-            # Add to the first message (most likely user message)
-            first_message = messages_gemini[0]
-            # Only insert if parts is a list
-            if isinstance(first_message.get("parts"), list):
-                first_message["parts"].insert(0, f"*{system_prompt}*")
-        else:
-            # Create a new user message just for the system prompt
-            messages_gemini.append({"role": "user", "parts": [f"*{system_prompt}*"]})
-
-    return messages_gemini
-
-
 def map_to_gemini_function_schema(obj: dict[str, Any]) -> dict[str, Any]:
     """
     Map OpenAPI schema to Gemini properties: gemini function call schemas
@@ -699,9 +605,6 @@ def update_gemini_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """
     Update keyword arguments for Gemini API from OpenAI format.
 
-    This optimized version reduces redundant operations and uses
-    efficient data transformations.
-
     Args:
         kwargs: Dictionary of keyword arguments to update
 
@@ -711,8 +614,7 @@ def update_gemini_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     # Make a copy of kwargs to avoid modifying the original
     result = kwargs.copy()
 
-    # Mapping of OpenAI args to Gemini args - defined as constant
-    # for quicker lookup without recreating the dictionary on each call
+    # Mapping of OpenAI args to Gemini args
     OPENAI_TO_GEMINI_MAP = {
         "max_tokens": "max_output_tokens",
         "temperature": "temperature",
@@ -724,40 +626,29 @@ def update_gemini_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     # Update generation_config if present
     if "generation_config" in result:
         gen_config = result["generation_config"]
-
-        # Bulk process the mapping with fewer conditionals
         for openai_key, gemini_key in OPENAI_TO_GEMINI_MAP.items():
             if openai_key in gen_config:
                 val = gen_config.pop(openai_key)
                 if val is not None:  # Only set if value is not None
                     gen_config[gemini_key] = val
 
-    # Transform messages format if messages key exists
-    if "messages" in result:
-        # Transform messages and store them under "contents" key
-        result["contents"] = transform_to_gemini_prompt(result.pop("messages"))
-
-    # Handle safety settings - import here to avoid circular imports
-    from google.generativeai.types import HarmCategory, HarmBlockThreshold  # type: ignore
+    # Handle safety settings
+    from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
     # Create or get existing safety settings
     safety_settings = result.get("safety_settings", {})
     result["safety_settings"] = safety_settings
 
-    # Define default safety thresholds - these are static and can be
-    # defined once rather than recreating the dict on each call
+    # Define default safety thresholds
     DEFAULT_SAFETY_THRESHOLDS = {
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
     }
 
-    # Update safety settings with defaults if needed (more efficient loop)
+    # Update safety settings with defaults if needed
     for category, threshold in DEFAULT_SAFETY_THRESHOLDS.items():
         current = safety_settings.get(category)
-        # Only update if not set or less restrictive than default
-        # Note: Lower values are more restrictive in HarmBlockThreshold
-        # BLOCK_NONE = 0, BLOCK_LOW_AND_ABOVE = 1, BLOCK_MEDIUM_AND_ABOVE = 2, BLOCK_ONLY_HIGH = 3
         if current is None or current > threshold:
             safety_settings[category] = threshold
 
